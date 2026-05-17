@@ -1,4 +1,5 @@
 #![no_std]
+
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
 
 // ============================================================
@@ -12,7 +13,7 @@ pub struct Tier {
     pub tier_id: u32,
     pub creator: Address,
     pub name: String,
-   pub price: i128,     // price in stroops (USDC base units)
+    pub price: i128,     // price in stroops (USDC base units)
     pub duration: u64,   // duration in seconds
     pub max_supply: u32, // 0 = unlimited
     pub minted: u32,
@@ -153,9 +154,10 @@ impl StarPassContract {
         env.storage()
             .persistent()
             .set(&DataKey::CreatorBalance(creator.clone()), &0i128);
-        env.storage()
-            .persistent()
-            .set(&DataKey::CreatorTiers(creator.clone()), &Vec::<u32>::new(&env));
+        env.storage().persistent().set(
+            &DataKey::CreatorTiers(creator.clone()),
+            &Vec::<u32>::new(&env),
+        );
 
         env.events()
             .publish((Symbol::new(&env, "creator_registered"),), (creator, now));
@@ -206,9 +208,7 @@ impl StarPassContract {
         env.storage()
             .persistent()
             .set(&DataKey::Tier(tier_id), &tier);
-        env.storage()
-            .instance()
-            .set(&DataKey::TierCount, &tier_id);
+        env.storage().instance().set(&DataKey::TierCount, &tier_id);
 
         // Add tier to creator's tier list
         let mut tiers: Vec<u32> = env
@@ -359,9 +359,7 @@ impl StarPassContract {
         env.storage()
             .persistent()
             .set(&DataKey::Pass(pass_id), &pass);
-        env.storage()
-            .instance()
-            .set(&DataKey::PassCount, &pass_id);
+        env.storage().instance().set(&DataKey::PassCount, &pass_id);
 
         // Update tier minted count
         tier.minted += 1;
@@ -426,11 +424,12 @@ impl StarPassContract {
     // --------------------------------------------------------
 
     /// Check if a fan has a valid (non-expired) pass for a tier
-pub fn has_valid_pass(env: Env, fan: Address, tier_id: u32) -> bool {
-    let fan_passes: Vec<u64> = match env.storage().persistent().get(&DataKey::FanPasses(fan)) {
-        Some(p) => p,
-        None => return false,
-    };
+    pub fn has_valid_pass(env: Env, fan: Address, tier_id: u32) -> bool {
+        let fan_passes: Vec<u64> =
+            match env.storage().persistent().get(&DataKey::FanPasses(fan)) {
+                Some(p) => p,
+                None => return false,
+            };
 
         let now = env.ledger().timestamp();
 
@@ -515,6 +514,7 @@ pub fn has_valid_pass(env: Env, fan: Address, tier_id: u32) -> bool {
 // ============================================================
 // Tests
 // ============================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
