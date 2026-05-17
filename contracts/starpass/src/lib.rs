@@ -522,7 +522,6 @@ impl StarPassContract {
 // ============================================================
 // Tests
 // ============================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,7 +531,7 @@ mod tests {
         Address, Env, String,
     };
 
-    fn setup() -> (Env, Address, Address, Address, Address) {
+    fn setup_env() -> (Env, Address, Address, Address, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -540,27 +539,18 @@ mod tests {
         let creator = Address::generate(&env);
         let fan = Address::generate(&env);
 
-        // Create mock USDC token
         let token_admin = Address::generate(&env);
         let token = env
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
 
-        // Mint USDC to fan
         StellarAssetClient::new(&env, &token).mint(&fan, &10_000_000);
 
-        // Deploy and initialize StarPass contract
-        let contract_id = env.register(StarPassContract, ());
+        let contract_id = env.register_contract(None, StarPassContract);
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32); // 2.5% fee
+        client.initialize(&admin, &token, &250u32);
 
-        (env, admin, creator, fan, token)
-    }
-
-    fn get_client(env: &Env) -> (Address, StarPassContractClient) {
-        let contract_id = env.register(StarPassContract, ());
-        let client = StarPassContractClient::new(env, &contract_id);
-        (contract_id, client)
+        (env, contract_id, admin, creator, fan, token)
     }
 
     #[test]
@@ -573,7 +563,7 @@ mod tests {
             .register_stellar_asset_contract_v2(token_admin)
             .address();
 
-        let contract_id = env.register(StarPassContract, ());
+        let contract_id = env.register_contract(None, StarPassContract);
         let client = StarPassContractClient::new(&env, &contract_id);
         client.initialize(&admin, &token, &250u32);
 
@@ -583,10 +573,8 @@ mod tests {
 
     #[test]
     fn test_register_creator() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, _fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
 
         client.register_creator(&creator);
         let profile = client.get_creator(&creator);
@@ -598,18 +586,16 @@ mod tests {
 
     #[test]
     fn test_create_tier() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, _fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
             &creator,
             &String::from_str(&env, "Gold"),
-            &1_000_000i128, // 1 USDC
-            &2_592_000u64,  // 30 days in seconds
-            &0u32,          // unlimited
+            &1_000_000i128,
+            &2_592_000u64,
+            &0u32,
         );
 
         assert_eq!(tier_id, 1);
@@ -621,10 +607,8 @@ mod tests {
 
     #[test]
     fn test_mint_pass() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
@@ -646,12 +630,9 @@ mod tests {
 
     #[test]
     fn test_has_valid_pass() {
-        let (env, admin, creator, fan, token) = setup();
+        let (env, contract_id, _admin, creator, fan, _token) = setup_env();
         env.ledger().set_timestamp(1000);
-
-        let contract_id = env.register(StarPassContract, ());
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
@@ -662,43 +643,34 @@ mod tests {
             &0u32,
         );
 
-        // Before minting — no valid pass
         assert_eq!(client.has_valid_pass(&fan, &tier_id), false);
-
-        // After minting — valid pass
         client.mint_pass(&fan, &tier_id);
         assert_eq!(client.has_valid_pass(&fan, &tier_id), true);
     }
 
     #[test]
     fn test_fee_split() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32); // 2.5%
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
             &creator,
             &String::from_str(&env, "Gold"),
-            &1_000_000i128, // 1 USDC = 1_000_000 stroops
+            &1_000_000i128,
             &2_592_000u64,
             &0u32,
         );
 
         client.mint_pass(&fan, &tier_id);
-
-        // Creator should receive 97.5% = 975_000
         let creator_balance = client.get_creator_balance(&creator);
         assert_eq!(creator_balance, 975_000);
     }
 
     #[test]
     fn test_creator_withdraw() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
@@ -718,37 +690,28 @@ mod tests {
 
     #[test]
     fn test_max_supply_enforced() {
-        let (env, admin, creator, fan, token) = setup();
-        // Give fan more tokens
+        let (env, contract_id, _admin, creator, fan, token) = setup_env();
         StellarAssetClient::new(&env, &token).mint(&fan, &100_000_000);
-
-        let contract_id = env.register(StarPassContract, ());
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
-        // Create tier with max supply of 1
         let tier_id = client.create_tier(
             &creator,
             &String::from_str(&env, "Limited"),
             &1_000_000i128,
             &2_592_000u64,
-            &1u32, // max 1
+            &1u32,
         );
 
         client.mint_pass(&fan, &tier_id);
-
-        // Second mint should fail
         let result = client.try_mint_pass(&fan, &tier_id);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_deactivate_tier() {
-        let (env, admin, creator, fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
@@ -763,7 +726,6 @@ mod tests {
         let tier = client.get_tier(&tier_id);
         assert_eq!(tier.active, false);
 
-        // Minting deactivated tier should fail
         let result = client.try_mint_pass(&fan, &tier_id);
         assert!(result.is_err());
     }
@@ -771,16 +733,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "Price must be greater than zero")]
     fn test_zero_price_rejected() {
-        let (env, admin, creator, _fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, _fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         client.create_tier(
             &creator,
             &String::from_str(&env, "Free"),
-            &0i128, // invalid
+            &0i128,
             &2_592_000u64,
             &0u32,
         );
@@ -788,10 +748,8 @@ mod tests {
 
     #[test]
     fn test_update_tier_price() {
-        let (env, admin, creator, _fan, token) = setup();
-        let contract_id = env.register(StarPassContract, ());
+        let (env, contract_id, _admin, creator, _fan, _token) = setup_env();
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier_id = client.create_tier(
@@ -809,12 +767,9 @@ mod tests {
 
     #[test]
     fn test_get_fan_passes() {
-        let (env, admin, creator, fan, token) = setup();
+        let (env, contract_id, _admin, creator, fan, token) = setup_env();
         StellarAssetClient::new(&env, &token).mint(&fan, &100_000_000);
-
-        let contract_id = env.register(StarPassContract, ());
         let client = StarPassContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &token, &250u32);
         client.register_creator(&creator);
 
         let tier1 = client.create_tier(
